@@ -1,0 +1,133 @@
+version: '3.8'
+services:
+  auth:
+    build:
+      context: ./auth-service
+      dockerfile: Dockerfile
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://auth:3000"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+  user:
+    build:
+      context: ./user-service
+      dockerfile: Dockerfile
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://user:3000"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+  email:
+    build:
+      context: ./email-service
+      dockerfile: Dockerfile
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://email:3000"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+  interface:
+    build:
+      context: ./interface-service
+      dockerfile: Dockerfile
+    # network_mode: "host"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://interface:8080"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+  match:
+    build:
+      context: ./matching-service
+      dockerfile: Dockerfile
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://match:3000"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+  db:
+    image: postgres:13
+    volumes:
+      - postgresql-data:/var/lib/postgresql/data
+      - ./database/up.sql:/docker-entrypoint-initdb.d/up.sql
+      - ./database/seed.sql:/docker-entrypoint-initdb.d/z_seed.sql
+    environment:
+      - POSTGRES_USERNAME=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=postgres
+    command: ["postgres", "-c", "log_statement=all", "-c", "log_destination=stderr"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+  shelter:
+    build:
+      context: ./shelter-service
+      dockerfile: Dockerfile
+    # command: bundle exec bin/rails s -p 3000 -b '0.0.0.0'
+    volumes:
+      - .:/shelter-service
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://shelter:3000/shelters/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+  pet:
+    build:
+      context: ./pet-service
+      dockerfile: Dockerfile
+    # command: bundle exec bin/rails s -p 3000 -b '0.0.0.0'
+    volumes:
+      - .:/pet-service
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://pet:3000"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+  nginx-proxy:
+    container_name: nginx-proxy
+    build:
+      context: ./nginx
+    volumes:
+      - /etc/nginx/vhost.d
+      - /etc/acme.sh
+      - /usr/share/nginx/html
+      - /var/run/docker.sock:/tmp/docker.sock:ro
+    ports:
+      - '80:80'
+    depends_on:
+      email:
+        condition: service_healthy
+      user:
+        condition: service_healthy
+      auth:
+        condition: service_healthy
+      interface:
+        condition: service_healthy
+      shelter:  
+        condition: service_started
+      pet:  
+        condition: service_started
+      match:
+        condition: service_healthy
+    restart: unless-stopped
+volumes:
+  postgresql-data:
+    driver: local
